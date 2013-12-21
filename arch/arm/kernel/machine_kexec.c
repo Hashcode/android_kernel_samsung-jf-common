@@ -2,6 +2,7 @@
  * machine_kexec.c - handle transition of Linux booting another kernel
  */
 
+#include <linux/module.h>
 #include <linux/mm.h>
 #include <linux/kexec.h>
 #include <linux/delay.h>
@@ -23,7 +24,7 @@ extern unsigned long kexec_indirection_page;
 extern unsigned long kexec_mach_type;
 extern unsigned long kexec_boot_atags;
 
-static atomic_t waiting_for_crash_ipi;
+//static atomic_t waiting_for_crash_ipi;
 
 /*
  * Provide a dummy crash_notes definition while crash dump arrives to arm.
@@ -34,13 +35,21 @@ int machine_kexec_prepare(struct kimage *image)
 {
 	return 0;
 }
+EXPORT_SYMBOL(machine_kexec_prepare);
 
 void machine_kexec_cleanup(struct kimage *image)
 {
 }
+EXPORT_SYMBOL(machine_kexec_cleanup);
+
+void machine_shutdown(void)
+{
+}
+EXPORT_SYMBOL(machine_shutdown);
 
 void machine_crash_nonpanic_core(void *unused)
 {
+#if 0
 	struct pt_regs regs;
 
 	crash_setup_regs(&regs, NULL);
@@ -52,8 +61,10 @@ void machine_crash_nonpanic_core(void *unused)
 	atomic_dec(&waiting_for_crash_ipi);
 	while (1)
 		cpu_relax();
+#endif
 }
 
+#if 0
 static void machine_kexec_mask_interrupts(void)
 {
 	unsigned int i;
@@ -76,9 +87,11 @@ static void machine_kexec_mask_interrupts(void)
 			chip->irq_disable(&desc->irq_data);
 	}
 }
+#endif
 
 void machine_crash_shutdown(struct pt_regs *regs)
 {
+#if 0
 	unsigned long msecs;
 
 	local_irq_disable();
@@ -97,6 +110,7 @@ void machine_crash_shutdown(struct pt_regs *regs)
 	machine_kexec_mask_interrupts();
 
 	printk(KERN_INFO "Loading crashdump kernel...\n");
+#endif
 }
 
 /*
@@ -138,3 +152,6 @@ void machine_kexec(struct kimage *image)
 
 	soft_restart(reboot_code_buffer_phys);
 }
+EXPORT_SYMBOL(machine_kexec);
+
+MODULE_LICENSE("GPL");
