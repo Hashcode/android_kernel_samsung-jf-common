@@ -1129,6 +1129,7 @@ void __weak crash_free_reserved_phys_range(unsigned long begin,
 	}
 }
 
+#if 0
 int crash_shrink_memory(unsigned long new_size)
 {
 	int ret = 0;
@@ -1179,6 +1180,7 @@ unlock:
 	mutex_unlock(&kexec_mutex);
 	return ret;
 }
+#endif
 
 static u32 *append_elf_note(u32 *buf, char *name, unsigned type, void *data,
 			    size_t data_len)
