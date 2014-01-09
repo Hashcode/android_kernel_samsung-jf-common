@@ -77,7 +77,7 @@ void kexec_identity_mapping_add(pgd_t *pgd, unsigned long addr, unsigned long en
 		// HASH: flush
 //		local_flush_tlb_all();
 	} while (pgd++, addr = next, addr != end);
-	printk(KERN_EMERG "MKEXEC: end mappings end==0x%08lx: 0x%08lx\n", end, addr);
+	printk(KERN_EMERG "MKEXEC: end mappings end==0x%08lx\n", end);
 }
 
 /*
@@ -165,10 +165,10 @@ void soft_restart(unsigned long addr)
 		outer_disable();
 	}
 
-	printk(KERN_EMERG "MKEXEC: kexec_identity_mapping_add\n");
+	printk(KERN_EMERG "MKEXEC: kexec_identity_mapping_add (TASK_SIZE=0x%8lx, PAGE_OFFSET=0x%8lx\n", TASK_SIZE, PAGE_OFFSET);
 	/* http://review.omapzoom.org/#/c/32213/ */
 	kexec_identity_mapping_add(current->active_mm->pgd, 0, TASK_SIZE);
-//	kexec_identity_mapping_add(current->active_mm->pgd, TASK_SIZE, PAGE_OFFSET);
+	kexec_identity_mapping_add(current->active_mm->pgd, TASK_SIZE, PAGE_OFFSET);
 
 	printk(KERN_EMERG "MKEXEC: kexec_setup_mm_for_reboot\n");
 	/* Take out a flat memory mapping. */
