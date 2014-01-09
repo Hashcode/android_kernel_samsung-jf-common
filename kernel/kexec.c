@@ -1615,12 +1615,20 @@ int kernel_kexec(void)
 	} else
 #endif
 	{
+		printk(KERN_EMERG "KEXEC: preempt_disable\n");
+		preempt_disable();
+
+		printk(KERN_EMERG "KEXEC: disable interrupts\n");
+		local_irq_disable();
+		local_fiq_disable();
+
+		printk(KERN_EMERG "KEXEC: kernel_restart_prepare_ptr\n");
 		kernel_restart_prepare_ptr(NULL);
-		printk(KERN_EMERG "Machine shutdown\n");
+		printk(KERN_EMERG "KEXEC: machine_shutdown\n");
 		machine_shutdown();
 	}
 
-	printk(KERN_EMERG "Machine kexec\n");
+	printk(KERN_EMERG "KEXEC: machine_kexec\n");
 	machine_kexec(kexec_image);
 
 #ifdef CONFIG_KEXEC_JUMP
