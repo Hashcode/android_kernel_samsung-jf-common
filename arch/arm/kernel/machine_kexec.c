@@ -80,7 +80,6 @@ void kexec_identity_mapping_add(pgd_t *pgd, unsigned long addr, unsigned long en
 	printk(KERN_EMERG "MKEXEC: end mappings end==0x%08lx: 0x%08lx\n", end, addr);
 }
 
-#if 0
 /*
  * In order to soft-boot, we need to insert a 1:1 mapping in place of
  * the user-mode pages.  This will then ensure that we have predictable
@@ -112,7 +111,6 @@ void kexec_identity_map(unsigned long phys_addr)
 
 	local_flush_tlb_all();
 }
-#endif
 
 /*
  * A temporary stack to use for CPU reset. This is static so that we
