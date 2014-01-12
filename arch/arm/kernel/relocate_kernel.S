@@ -7,15 +7,6 @@
 	.globl relocate_new_kernel
 relocate_new_kernel:
 
-	@ reset
-	mrc	p15, 0, r1, c1, c0, 0		@ ctrl register
-	bic	r1, r1, #0x1			@ ...............m
- THUMB(	bic	r1, r1, #1 << 30 )		@ SCTLR.TE (Thumb exceptions)
-	mcr	p15, 0, r1, c1, c0, 0		@ disable MMU
-	mcr     p15, 0, ip, c8, c7, 0           @ invalidate I & D,flush TLB
-	mcr     p15, 0, ip, c7, c5, 6           @ flush BTC
-	dsb
-	isb
 	ldr	r0,kexec_indirection_page
 	ldr	r1,kexec_start_address
 
