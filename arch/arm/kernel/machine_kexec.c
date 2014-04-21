@@ -19,10 +19,11 @@
 #include <asm/system_misc.h>
 #include <asm/outercache.h>
 
+#define USE_SERIAL 0
+
 extern const unsigned char relocate_new_kernel[];
 extern const unsigned int relocate_new_kernel_size;
 
-void (*kexec_setup_mm_for_reboot)(void);
 void (*kexec_gic_raise_softirq)(const struct cpumask *mask, unsigned int irq);
 int (*kexec_msm_pm_wait_cpu_shutdown)(unsigned int cpu);
 
@@ -74,8 +75,7 @@ void kexec_identity_mapping_add(pgd_t *pgd, unsigned long addr, unsigned long en
 	do {
 		next = pgd_addr_end(addr, end);
 		kexec_idmap_add_pud(pgd, addr, next, prot);
-		// HASH: flush
-//		local_flush_tlb_all();
+		local_flush_tlb_all();
 	} while (pgd++, addr = next, addr != end);
 	printk(KERN_EMERG "MKEXEC: end mappings end==0x%08lx\n", end);
 }
@@ -85,6 +85,7 @@ void kexec_identity_mapping_add(pgd_t *pgd, unsigned long addr, unsigned long en
  * the user-mode pages.  This will then ensure that we have predictable
  * results when turning the mmu off
  */
+#if 0
 void kexec_identity_map(unsigned long phys_addr)
 {
 	pgd_t *pgd;
@@ -111,6 +112,7 @@ void kexec_identity_map(unsigned long phys_addr)
 
 	local_flush_tlb_all();
 }
+#endif
 
 /*
  * A temporary stack to use for CPU reset. This is static so that we
@@ -121,30 +123,52 @@ void kexec_identity_map(unsigned long phys_addr)
  */
 static u64 soft_restart_stack[16];
 
-#define MSM_DEBUG_UART_PHYS	0x16440000
-#define UART_CSR      		(*(volatile uint32_t *)(MSM_DEBUG_UART_PHYS + 0x08))
-#define UART_TF       		(*(volatile uint32_t *)(MSM_DEBUG_UART_PHYS + 0x0c))
+#define MSM_DEBUG_UART_PHYS	0x16640000
 
-#define SERIAL_WRITE(c)		while (UART_CSR == 0) {}; UART_TF = c;
+#define UARTDM_MR2_OFFSET	0x4
+#define UARTDM_CSR_OFFSET	0x8
+#define UARTDM_SR_OFFSET	0x8
+#define UARTDM_CR_OFFSET	0x10
+#define UARTDM_ISR_OFFSET	0x14
+#define UARTDM_NCF_TX_OFFSET	0x40
+#define UARTDM_TF_OFFSET	0x70
+
+#ifdef USE_SERIAL
+#define SERIAL_WRITE(base, c)	while (!(*(volatile uint32_t *)(base + UARTDM_SR_OFFSET) & 0x08)) {}; \
+				(*(volatile uint32_t *)(base + UARTDM_CR_OFFSET)) = 0x300; \
+				(*(volatile uint32_t *)(base + UARTDM_NCF_TX_OFFSET)) = 0x1; \
+				(*(volatile uint32_t *)(base + UARTDM_TF_OFFSET)) = c
+#else
+#define SERIAL_WRITE(base, c)	;
+#endif
 
 static void __soft_restart(void *addr)
 {
 	phys_reset_t phys_reset = (phys_reset_t)addr;
 
+	/* Take out a flat memory mapping. */
+	// HASH: We've already setup our static mapping
+	// setup_mm_for_reboot();
+
 	/* Clean and invalidate caches */
+	SERIAL_WRITE(MSM_DEBUG_UART_PHYS, 'A');
 	flush_cache_all();
 
 	/* Turn off caching */
+	SERIAL_WRITE(MSM_DEBUG_UART_PHYS, 'B');
 //	cpu_proc_fin();
 	kexec_cpu_v7_proc_fin();
 
 	/* Push out any further dirty data, and ensure cache is empty */
+	SERIAL_WRITE(MSM_DEBUG_UART_PHYS, 'C');
 	flush_cache_all();
 
 	/* Push out the dirty data from external caches */
+	SERIAL_WRITE(MSM_DEBUG_UART_PHYS, 'D');
 	outer_disable();
 
 	/* Switch to the identity mapping. */
+	SERIAL_WRITE(MSM_DEBUG_UART_PHYS, 'E');
 //	phys_reset = (phys_reset_t)(unsigned long)virt_to_phys(kexec_cpu_v7_reset);
 //	phys_reset((unsigned long)addr);
 	phys_reset(0);
@@ -157,6 +181,10 @@ void soft_restart(unsigned long addr)
 {
 	u64 *stack = soft_restart_stack + ARRAY_SIZE(soft_restart_stack);
 
+	/* Disable interrupts first */
+	local_irq_disable();
+	local_fiq_disable();
+
 	/* Disable the L2 if we're the last man standing. */
 	if (num_online_cpus() == 1) {
 		printk(KERN_EMERG "MKEXEC: outer_flush_all\n");
@@ -165,17 +193,25 @@ void soft_restart(unsigned long addr)
 		outer_disable();
 	}
 
-	printk(KERN_EMERG "MKEXEC: kexec_identity_mapping_add (TASK_SIZE=0x%8lx, PAGE_OFFSET=0x%8lx\n", TASK_SIZE, PAGE_OFFSET);
-	/* http://review.omapzoom.org/#/c/32213/ */
-	kexec_identity_mapping_add(current->active_mm->pgd, 0, TASK_SIZE);
-	kexec_identity_mapping_add(current->active_mm->pgd, TASK_SIZE, PAGE_OFFSET);
+	/* static mappings:
+	 * UART
+	 * relocate_kernel.S
+	 */
+	printk(KERN_EMERG "MKEXEC: kexec_identity_mapping_add 0x%08x-0x%08x\n",
+		MSM_DEBUG_UART_PHYS, MSM_DEBUG_UART_PHYS + 0x1000);
+	kexec_identity_mapping_add(current->active_mm->pgd, MSM_DEBUG_UART_PHYS, MSM_DEBUG_UART_PHYS + 0x1000);
 
-	printk(KERN_EMERG "MKEXEC: kexec_setup_mm_for_reboot\n");
-	/* Take out a flat memory mapping. */
-	kexec_setup_mm_for_reboot();
+	/* Clean and invalidate L1. */
+	printk(KERN_EMERG "MKEXEC: flush_cache_all() \n");
+	flush_cache_all();
 
-	printk(KERN_EMERG "MKEXEC: kexec_call_with_stack (kexec_call_with_stack=0x%8lx, __soft_reset=0x%8lx, addr=0x%8lx, stack=0x%8lx)\n", (unsigned long)kexec_call_with_stack, (unsigned long)__soft_restart, addr, (unsigned long)stack);
+	/* Flush the TLB. */
+	printk(KERN_EMERG "MKEXEC: local_flush_tlb_all() \n");
+	local_flush_tlb_all();
+
 	/* Change to the new stack and continue with the reset. */
+	printk(KERN_EMERG "MKEXEC: kexec_call_with_stack (va: 0x%8lx, __soft_reset: 0x%8lx, addr: 0x%8lx, stack: 0x%8lx)\n",
+		(unsigned long)kexec_call_with_stack, (unsigned long)__soft_restart, addr, (unsigned long)stack);
 	kexec_call_with_stack(__soft_restart, (void *)addr, (void *)stack);
 
 	printk(KERN_EMERG "MKEXEC: ARRRRGGGGHH! NOT SUPPOSED TO BE HERE.\n");
@@ -333,16 +369,23 @@ void machine_kexec(struct kimage *image)
 	unsigned long reboot_code_buffer_phys;
 	void *reboot_code_buffer;
 
+	if (num_online_cpus() > 1) {
+		pr_err("kexec: error: multiple CPUs still online\n");
+		return;
+	}
 
 	page_list = image->head & PAGE_MASK;
+
+	/* Disable preemption */
+	preempt_disable();
 
 	/* we need both effective and real address here */
 	reboot_code_buffer_phys =
 	    page_to_pfn(image->control_code_page) << PAGE_SHIFT;
 	reboot_code_buffer = page_address(image->control_code_page);
 
-	printk(KERN_EMERG "MKEXEC: va: %08x\n", (int)reboot_code_buffer);
-	printk(KERN_EMERG "MKEXEC: pa: %08x\n", (int)reboot_code_buffer_phys);
+	printk(KERN_EMERG "MKEXEC: va: %08x\n", (unsigned int)reboot_code_buffer);
+	printk(KERN_EMERG "MKEXEC: pa: %08x\n", (unsigned int)reboot_code_buffer_phys);
 
 	/* Prepare parameters for reboot_code_buffer*/
 	kexec_start_address = image->start;
@@ -355,13 +398,12 @@ void machine_kexec(struct kimage *image)
 	printk(KERN_EMERG "MKEXEC: kexec_mach_type: %08lx\n", kexec_mach_type);
 	printk(KERN_EMERG "MKEXEC: kexec_boot_atags: %08lx\n", kexec_boot_atags);
 
-	kexec_identity_map(reboot_code_buffer_phys);
+	kexec_identity_mapping_add(current->active_mm->pgd, reboot_code_buffer_phys, reboot_code_buffer_phys + relocate_new_kernel_size);
 
 	/* copy our kernel relocation code to the control code page */
 	printk(KERN_EMERG "MKEXEC: copy relocate code: addr=0x%08lx, len==%d\n", (long unsigned int)reboot_code_buffer, relocate_new_kernel_size);
 	memcpy(reboot_code_buffer,
 	       relocate_new_kernel, relocate_new_kernel_size);
-
 
 	printk(KERN_EMERG "MKEXEC: flush_icache_range\n");
 	flush_icache_range((unsigned long) reboot_code_buffer,
@@ -383,14 +425,11 @@ static int __init arm_kexec_init(void)
 	void (*set_cpu_possible_ptr)(unsigned int cpu, bool possible) = (void *)kallsyms_lookup_name("set_cpu_possible");
 	int (*disable_nonboot_cpus)(void) = (void *)kallsyms_lookup_name("disable_nonboot_cpus");
 	int nbcval = 0;
+
 	nbcval = disable_nonboot_cpus();
 	if (nbcval < 0)
 		printk(KERN_INFO "MKEXEC: !!!WARNING!!! disable_nonboot_cpus have FAILED!\n \
 				  Continuing to boot anyway: something can go wrong!\n");
-
-	kexec_setup_mm_for_reboot = (void *)kallsyms_lookup_name("setup_mm_for_reboot");
-	if (kexec_setup_mm_for_reboot == NULL)
-		printk(KERN_EMERG "MKEXEC: !!!ERROR!!! FAILED TO FIND 'setup_mm_for_reboot'!\n");
 
 	set_cpu_online_ptr(1, false);
 	set_cpu_present_ptr(1, false);
